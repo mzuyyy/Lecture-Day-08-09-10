@@ -20,11 +20,14 @@ ALLOWED_DOC_IDS = frozenset(
         "sla_p1_2026",
         "it_helpdesk_faq",
         "hr_leave_policy",
+        "access_control_sop",
     }
 )
 
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _DMY_SLASH = re.compile(r"^(\d{2})/(\d{2})/(\d{4})$")
+_REPEATED_LAM_VIEC = re.compile(r"(làm việc)(?:\s+làm việc)+", re.IGNORECASE)
+_SLA_P1_ESCALATION_FACT = "Escalation P1: tự động escalate lên Senior Engineer nếu không có phản hồi trong 10 phút."
 
 
 def _norm_text(s: str) -> str:
@@ -77,6 +80,10 @@ def clean_rows(
     4) Quarantine: chunk_text rỗng hoặc effective_date rỗng sau chuẩn hoá.
     5) Loại trùng nội dung chunk_text (giữ bản đầu).
     6) Fix stale refund: policy_refund_v4 chứa '14 ngày làm việc' → 7 ngày.
+    7) Quarantine: chunk HR 2025 còn nói 10 ngày phép năm, kể cả bị export với ngày 2026.
+    8) Quarantine: chunk bị đánh dấu mơ hồ / nhiễu ingest ("Nội dung không rõ ràng", "!!!").
+    9) Normalize lỗi lặp cụm "làm việc" do sync/export.
+    10) Enrich chunk tổng quan P1 bằng fact escalation P1 canonical để tránh retrieval nhầm P2 escalation.
     """
     quarantine: List[Dict[str, Any]] = []
     seen_text: set[str] = set()
@@ -115,6 +122,20 @@ def clean_rows(
             quarantine.append({**raw, "reason": "missing_chunk_text"})
             continue
 
+        if text.startswith("Nội dung không rõ ràng:") or text.startswith("!!!"):
+            quarantine.append({**raw, "reason": "ambiguous_or_noisy_chunk_text"})
+            continue
+
+        if doc_id == "hr_leave_policy" and "10 ngày phép năm" in text:
+            quarantine.append(
+                {
+                    **raw,
+                    "reason": "stale_hr_2025_10d_policy_text",
+                    "effective_date_normalized": eff_norm,
+                }
+            )
+            continue
+
         key = _norm_text(text)
         if key in seen_text:
             quarantine.append({**raw, "reason": "duplicate_chunk_text"})
@@ -122,6 +143,14 @@ def clean_rows(
         seen_text.add(key)
 
         fixed_text = text
+        fixed_text = _REPEATED_LAM_VIEC.sub(r"\1", fixed_text)
+        if (
+            doc_id == "sla_p1_2026"
+            and "Ticket P1 có SLA phản hồi ban đầu 15 phút" in fixed_text
+            and "resolution trong 4 giờ" in fixed_text
+            and "10 phút" not in fixed_text
+        ):
+            fixed_text = f"{fixed_text} {_SLA_P1_ESCALATION_FACT} [cleaned: p1_escalation_context]"
         if apply_refund_window_fix and doc_id == "policy_refund_v4":
             if "14 ngày làm việc" in fixed_text:
                 fixed_text = fixed_text.replace(

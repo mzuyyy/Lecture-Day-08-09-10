@@ -48,16 +48,36 @@ Pipeline sẽ **HALT** do expectation phát hiện dữ liệu chưa sạch. Đ�
 **Bước 2 — Phân tích dữ liệu raw:**
 
 - Có bao nhiêu `doc_id` **unique** trong `data/raw/policy_export_dirty.csv`?
+
+    Có 3 doc_id unique
+
 - `ALLOWED_DOC_IDS` trong `transform/cleaning_rules.py` chứa những doc_id nào?
+
+    Có 4 doc_id: `policy_refund_v4`, `sla_p1_2026`, `it_helpdesk_faq`, `r_leave_policy`.
+
 - Có nguồn dữ liệu hợp lệ nào trong CSV bị pipeline **bỏ qua** (quarantine nhầm) không?
+
+    Có. access_control_sop là nguồn hợp lệ nhưng chưa có trong ALLOWED_DOC_IDS, nên pipeline hiện tại sẽ quarantine toàn bộ các dòng này với lý do unknown_doc_id.
 
 **Bước 3 — Đối chiếu với câu hỏi đánh giá:**
 
 - Mở `data/grading_questions.json`, kiểm tra trường `expect_top1_doc_id` — cần những nguồn nào?
+
+    Trong data/grading_questions.json, trường expect_top1_doc_id yêu cầu 5 nguồn sau:
+
+        policy_refund_v4
+        sla_p1_2026
+        it_helpdesk_faq
+        hr_leave_policy
+        access_control_sop
+
 - So sánh với những gì pipeline hiện tại cho phép — thiếu nguồn nào?
 
-**Bước 4 — Sửa pipeline:**
+    Pipeline đang thiếu:
 
+        access_control_sop
+        
+**Bước 4 — Sửa pipeline:**
 Cần sửa `transform/cleaning_rules.py` (và có thể cả `quality/expectations.py`):
 1. Cập nhật allowlist nếu phát hiện nguồn hợp lệ bị thiếu.
 2. Thêm cleaning rules để loại bỏ dữ liệu stale (ví dụ: nội dung chính sách cũ vẫn xuất hiện dù ngày export mới).
